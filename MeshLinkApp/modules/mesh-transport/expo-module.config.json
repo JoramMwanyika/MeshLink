@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android", "web"],
+  "apple": {
+    "modules": ["MeshTransportModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.meshtransport.MeshTransportModule"]
+  }
+}
