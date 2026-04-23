@@ -1,17 +1,38 @@
 import { View, Text, StyleSheet, TextInput, FlatList, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { MeshEngine } from '../../core/mesh/MeshEngine';
+import { DBManager } from '../../core/database/dbManager';
 
 export default function ChatScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const [inputText, setInputText] = useState('');
-  
-  const [messages, setMessages] = useState([
-    { id: 'm1', text: 'Hey! Are you coming to the meeting point?', sender: 'them', time: '10:20 AM' },
-    { id: 'm2', text: 'Yes, on my way. 5 mins.', sender: 'me', time: '10:21 AM', status: 'delivered' }
-  ]);
+  const [messages, setMessages] = useState<any[]>([]);
+
+  useEffect(() => {
+    const loadMessages = async () => {
+        const msgs = await DBManager.getInstance().getMessagesForChat(id as string);
+        setMessages(msgs.map((m: any) => ({
+            id: m.id,
+            text: m.content,
+            sender: m.sender_id === 'SELF' ? 'me' : 'them',
+            time: new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            status: m.status
+        })));
+    };
+
+    loadMessages();
+
+    // Subscribe to new messages
+    const unsubscribe = MeshEngine.getInstance().subscribeToMessages((msg) => {
+        if (msg.sender_id === id || msg.receiver_id === id) {
+            loadMessages();
+        }
+    });
+
+    return unsubscribe;
+  }, [id]);
 
   const handleSend = async () => {
     if (!inputText.trim()) return;
@@ -19,15 +40,7 @@ export default function ChatScreen() {
     try {
         const engine = MeshEngine.getInstance();
         await engine.sendDirect(id as string, inputText);
-        
-        const newMsg = {
-          id: Date.now().toString(),
-          text: inputText,
-          sender: 'me',
-          time: 'Now',
-          status: 'pending'
-        };
-        setMessages([...messages, newMsg]);
+        await loadMessages();
         setInputText('');
     } catch (e) {
         console.error("Failed to send message over mesh", e);

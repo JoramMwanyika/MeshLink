@@ -13,6 +13,7 @@ export default function TabLayout() {
       <Tabs.Screen name="map" options={{ title: 'Map' }} />
       <Tabs.Screen name="inbox" options={{ title: 'Inbox' }} />
       <Tabs.Screen name="profile" options={{ title: 'Profile' }} />
+      <Tabs.Screen name="simulate" options={{ title: 'Sim' }} />
     </Tabs>
   );
 }

@@ -1,14 +1,30 @@
 import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
-
-const MOCK_CHATS = [
-  { id: '1', name: 'Sarah', msg: 'Hey! Are you coming to the...', time: '10:24 AM', unread: 2 },
-  { id: '2', name: 'Team Alpha', msg: 'Meeting point updated.', time: '09:11 AM', unread: 3 },
-  { id: '3', name: 'Mike', msg: 'Got the supplies.', time: 'Yesterday', unread: 0 },
-];
+import { useState, useEffect } from 'react';
+import { DBManager } from '../../core/database/dbManager';
+import { MeshEngine } from '../../core/mesh/MeshEngine';
 
 export default function ChatsScreen() {
   const router = useRouter();
+  const [chats, setChats] = useState<any[]>([]);
+
+  const loadChats = async () => {
+    const recent = await DBManager.getInstance().getAllRecentChats();
+    setChats(recent.map((c: any) => ({
+      id: c.peer_id,
+      name: c.peer_id, // In a real app, we'd look up the name in the 'Devices' table
+      msg: c.content,
+      time: new Date(c.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      unread: 0
+    })));
+  };
+
+  useEffect(() => {
+    loadChats();
+    return MeshEngine.getInstance().subscribeToMessages(() => {
+      loadChats();
+    });
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -18,7 +34,7 @@ export default function ChatsScreen() {
 
       <View style={styles.statusWidget}>
         <Text style={styles.statusText}>You are connected</Text>
-        <Text style={styles.statusSub}>3 peers around you</Text>
+        <Text style={styles.statusSub}>{chats.length} peers around you</Text>
       </View>
 
       <View style={styles.listHeader}>
@@ -29,7 +45,7 @@ export default function ChatsScreen() {
       </View>
 
       <FlatList
-        data={MOCK_CHATS}
+        data={chats}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <TouchableOpacity 
