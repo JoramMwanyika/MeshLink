@@ -16,21 +16,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.meshlink.android.data.local.entity.MessageEntity
 import com.meshlink.android.ui.theme.MeshBlack
 import com.meshlink.android.ui.theme.MeshDarkBlue
 import com.meshlink.android.ui.theme.MeshGreen
 import com.meshlink.android.ui.theme.MeshGrey
-
-data class MockMessage(val id: String, val text: String, val isMe: Boolean, val time: String, val status: String)
+import com.meshlink.android.ui.viewmodel.MeshViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ChatScreen(peerId: String, peerName: String, onBack: () -> Unit) {
+fun ChatScreen(viewModel: MeshViewModel, peerId: String, peerName: String, onBack: () -> Unit) {
     var inputText by remember { mutableStateOf("") }
-    val messages = remember { mutableStateListOf(
-        MockMessage("1", "Hey! Are you coming to the meeting point?", false, "10:20 AM", ""),
-        MockMessage("2", "Yes, on my way. 5 mins.", true, "10:21 AM", "delivered")
-    ) }
+    val messages by viewModel.getMessagesForChat(peerId).collectAsState()
 
     Scaffold(
         topBar = {
@@ -38,7 +35,7 @@ fun ChatScreen(peerId: String, peerName: String, onBack: () -> Unit) {
                 title = {
                     Column {
                         Text(peerName, color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Text("Online (2m away)", color = MeshGreen, fontSize = 12.sp)
+                        Text("Connected via Mesh", color = MeshGreen, fontSize = 12.sp)
                     }
                 },
                 navigationIcon = {
@@ -89,7 +86,7 @@ fun ChatScreen(peerId: String, peerName: String, onBack: () -> Unit) {
                 IconButton(
                     onClick = {
                         if (inputText.isNotBlank()) {
-                            messages.add(MockMessage(System.currentTimeMillis().toString(), inputText, true, "Now", "pending"))
+                            viewModel.sendMessage(peerId, inputText)
                             inputText = ""
                         }
                     },
@@ -105,25 +102,26 @@ fun ChatScreen(peerId: String, peerName: String, onBack: () -> Unit) {
 }
 
 @Composable
-fun MessageBubble(msg: MockMessage) {
+fun MessageBubble(msg: MessageEntity) {
+    val isMe = msg.senderId == "SELF" || msg.status == "pending" || msg.status == "sent"
     Column(
         modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = if (msg.isMe) Alignment.End else Alignment.Start
+        horizontalAlignment = if (isMe) Alignment.End else Alignment.Start
     ) {
         Surface(
-            color = if (msg.isMe) MeshGreen else MeshDarkBlue,
+            color = if (isMe) MeshGreen else MeshDarkBlue,
             shape = RoundedCornerShape(
                 topStart = 16.dp,
                 topEnd = 16.dp,
-                bottomStart = if (msg.isMe) 16.dp else 4.dp,
-                bottomEnd = if (msg.isMe) 4.dp else 16.dp
+                bottomStart = if (isMe) 16.dp else 4.dp,
+                bottomEnd = if (isMe) 4.dp else 16.dp
             ),
             modifier = Modifier.widthIn(max = 280.dp)
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
                 Text(
-                    text = msg.text,
-                    color = if (msg.isMe) Color.Black else Color.White,
+                    text = msg.content,
+                    color = if (isMe) Color.Black else Color.White,
                     fontSize = 16.sp
                 )
                 Row(
@@ -132,13 +130,13 @@ fun MessageBubble(msg: MockMessage) {
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Text(
-                        text = msg.time,
-                        color = if (msg.isMe) Color.Black.copy(alpha = 0.6f) else MeshGrey,
+                        text = "Just now", // Format timestamp in real app
+                        color = if (isMe) Color.Black.copy(alpha = 0.6f) else MeshGrey,
                         fontSize = 11.sp
                     )
-                    if (msg.isMe) {
+                    if (isMe) {
                         Text(
-                            text = if (msg.status == "delivered") "✓✓" else "✓",
+                            text = if (msg.status == "received") "✓✓" else "✓",
                             color = Color.Black.copy(alpha = 0.6f),
                             fontSize = 11.sp
                         )

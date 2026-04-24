@@ -9,5 +9,6 @@ data class DeviceEntity(
     val name: String,
     val lastSeen: Long,
     val rssi: Int = 0,
-    val color: Int = 0xFF00FF66.toInt()
+    val color: Int = 0xFF00FF66.toInt(),
+    val macAddress: String? = null
 )

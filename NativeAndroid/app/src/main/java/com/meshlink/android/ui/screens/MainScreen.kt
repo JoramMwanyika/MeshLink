@@ -18,22 +18,34 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.tooling.preview.Preview
+import com.meshlink.android.data.local.dto.RecentChat
+import com.meshlink.android.data.local.entity.MessageEntity
 import com.meshlink.android.ui.theme.MeshBlack
-import com.meshlink.android.ui.theme.MeshDarkBlue
 import com.meshlink.android.ui.theme.MeshGreen
 import com.meshlink.android.ui.theme.MeshGrey
-
-data class MockChat(val id: String, val name: String, val msg: String, val time: String, val unread: Int)
+import com.meshlink.android.ui.theme.MeshLinkTheme
+import com.meshlink.android.ui.viewmodel.MeshViewModel
 
 @Composable
-fun MainScreen(onChatClick: (String, String) -> Unit) {
-    var selectedTab by remember { mutableStateOf(0) }
+fun MainScreen(viewModel: MeshViewModel, onChatClick: (String, String) -> Unit) {
+    val recentChats by viewModel.recentChats.collectAsState()
     
-    val mockChats = listOf(
-        MockChat("1", "Sarah", "Hey! Are you coming to the...", "10:24 AM", 2),
-        MockChat("2", "Team Alpha", "Meeting point updated.", "09:11 AM", 3),
-        MockChat("3", "Mike", "Got the supplies.", "Yesterday", 0)
+    MainContent(
+        recentChats = recentChats,
+        onChatClick = onChatClick,
+        peersContent = { PeersScreen(viewModel, onChatClick) },
+        getPeerName = { id -> viewModel.getDeviceName(id) }
     )
+}
+
+@Composable
+fun MainContent(
+    recentChats: List<RecentChat>,
+    onChatClick: (String, String) -> Unit,
+    peersContent: @Composable () -> Unit,
+    getPeerName: (String) -> String
+) {
+    var selectedTab by remember { mutableIntStateOf(0) }
 
     Scaffold(
         bottomBar = {
@@ -47,8 +59,8 @@ fun MainScreen(onChatClick: (String, String) -> Unit) {
         containerColor = MeshBlack
     ) { padding ->
         when (selectedTab) {
-            0 -> ChatListScreen(padding, mockChats, onChatClick)
-            1 -> Box(modifier = Modifier.padding(padding)) { PeersScreen() }
+            0 -> ChatListScreen(padding, recentChats, onChatClick, getPeerName)
+            1 -> Box(modifier = Modifier.padding(padding)) { peersContent() }
             else -> Box(modifier = Modifier.padding(padding).fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text("Coming Soon", color = MeshGrey)
             }
@@ -57,7 +69,7 @@ fun MainScreen(onChatClick: (String, String) -> Unit) {
 }
 
 @Composable
-fun ChatListScreen(padding: PaddingValues, chats: List<MockChat>, onChatClick: (String, String) -> Unit) {
+fun ChatListScreen(padding: PaddingValues, chats: List<RecentChat>, onChatClick: (String, String) -> Unit, getPeerName: (String) -> String) {
     Column(modifier = Modifier.padding(padding).padding(20.dp)) {
         Text("MeshLink", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
         
@@ -71,7 +83,7 @@ fun ChatListScreen(padding: PaddingValues, chats: List<MockChat>, onChatClick: (
         ) {
             Column {
                 Text("You are connected", color = MeshGreen, fontWeight = FontWeight.Bold)
-                Text("${chats.size} peers around you", color = MeshGrey, fontSize = 14.sp)
+                Text("Messaging active", color = MeshGrey, fontSize = 14.sp)
             }
         }
 
@@ -90,36 +102,41 @@ fun ChatListScreen(padding: PaddingValues, chats: List<MockChat>, onChatClick: (
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        LazyColumn {
-            items(chats) { chat ->
-                ChatRow(chat, onChatClick)
+        if (chats.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No recent chats", color = MeshGrey)
+            }
+        } else {
+            LazyColumn {
+                items(chats) { chat ->
+                    ChatRow(chat, onChatClick)
+                }
             }
         }
     }
 }
 
 @Composable
-fun ChatRow(chat: MockChat, onChatClick: (String, String) -> Unit) {
+fun ChatRow(chat: RecentChat, onChatClick: (String, String) -> Unit) {
+    val peerId = chat.peerId
+    val peerName = chat.peerName ?: "Peer $peerId"
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 15.dp)
-            .clickable { onChatClick(chat.id, chat.name) },
+            .clickable { onChatClick(peerId, peerName) },
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(modifier = Modifier.size(50.dp).background(Color(0xFF4F5E7B), CircleShape))
         Spacer(modifier = Modifier.width(15.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(chat.name, color = Color.White, fontWeight = FontWeight.Bold)
-            Text(chat.msg, color = MeshGrey, fontSize = 14.sp, maxLines = 1)
+            Text(peerName, color = Color.White, fontWeight = FontWeight.Bold)
+            Text(chat.lastMessage.content, color = MeshGrey, fontSize = 14.sp, maxLines = 1)
         }
         Column(horizontalAlignment = Alignment.End) {
-            Text(chat.time, color = MeshGrey, fontSize = 12.sp)
-            if (chat.unread > 0) {
-                Surface(color = MeshGreen, shape = RoundedCornerShape(10.dp), modifier = Modifier.padding(top = 5.dp)) {
-                    Text(chat.unread.toString(), color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                }
-            }
+            // Format timestamp in a real app
+            Text("Just now", color = MeshGrey, fontSize = 12.sp)
         }
     }
 }
@@ -127,5 +144,25 @@ fun ChatRow(chat: MockChat, onChatClick: (String, String) -> Unit) {
 @Preview
 @Composable
 fun MainScreenPreview() {
-    MainScreen(onChatClick = { _, _ -> })
+    MeshLinkTheme {
+        MainContent(
+            recentChats = emptyList(),
+            onChatClick = { _, _ -> },
+            peersContent = { Text("Peers Screen Placeholder", color = Color.White) },
+            getPeerName = { "Preview Peer" }
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+fun ChatListScreenPreview() {
+    MeshLinkTheme {
+        ChatListScreen(
+            padding = PaddingValues(0.dp),
+            chats = emptyList(),
+            onChatClick = { _, _ -> },
+            getPeerName = { "Preview Peer" }
+        )
+    }
 }

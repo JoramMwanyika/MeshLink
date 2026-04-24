@@ -2,18 +2,25 @@ package com.meshlink.android.mesh
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.meshlink.android.data.local.dao.DeviceDao
 import java.util.UUID
 
 class IdentityManager(context: Context) {
     private val prefs: SharedPreferences = context.getSharedPreferences("meshlink_identity", Context.MODE_PRIVATE)
 
-    fun getDeviceId(): String {
-        var id = prefs.getString("device_id", null)
-        if (id == null) {
-            id = "ML-" + UUID.randomUUID().toString().substring(0, 8).uppercase()
-            prefs.edit().putString("device_id", id).apply()
+    fun createAccount(displayName: String): String {
+        val newUuid = "ML-" + UUID.randomUUID().toString().substring(0, 8).uppercase()
+        prefs.edit().apply {
+            putString("device_id", newUuid)
+            putString("username", displayName)
+            apply()
         }
-        return id
+        
+        return newUuid
+    }
+
+    fun getDeviceId(): String {
+        return prefs.getString("device_id", "UNREGISTERED") ?: "UNREGISTERED"
     }
 
     fun getUsername(): String? {

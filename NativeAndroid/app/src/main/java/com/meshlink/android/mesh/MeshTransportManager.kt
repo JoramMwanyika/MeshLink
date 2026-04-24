@@ -1,47 +1,33 @@
 package com.meshlink.android.mesh
 
-import android.bluetooth.BluetoothAdapter
-import android.bluetooth.BluetoothManager
+import android.annotation.SuppressLint
+import android.bluetooth.*
 import android.bluetooth.le.*
 import android.content.Context
 import android.os.ParcelUuid
 import android.util.Log
 import java.util.*
 
-class MeshTransportManager(private val context: Context) {
+class MeshTransportManager(
+    private val context: Context,
+    private val identityManager: IdentityManager
+) {
     private val MESH_BLE_UUID = UUID.fromString("0000180D-0000-1000-8000-00805f9b34fb")
     private val MESH_MESSAGE_CHAR_UUID = UUID.fromString("00002A37-0000-1000-8000-00805f9b34fb")
     
     private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
     private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
+    private val bluetoothBackend = BluetoothBackendManager(bluetoothAdapter)
+    private val scannerManager = ScannerManager(context, bluetoothAdapter)
+    private val accountManager = AccountManager(context)
     
     private var isScanning = false
     private var isAdvertising = false
     private var gattServer: BluetoothGattServer? = null
 
     // Callbacks
-    var onPeerDiscovered: ((deviceId: String, address: String, rssi: Int) -> Unit)? = null
+    var onPeerDiscovered: ((deviceId: String, name: String?, address: String, rssi: Int) -> Unit)? = null
     var onMessageReceived: ((payload: String) -> Unit)? = null
-
-    init {
-        setupGattServer()
-    }
-
-    private fun setupGattServer() {
-        try {
-            gattServer = bluetoothManager.openGattServer(context, gattServerCallback)
-            val service = BluetoothGattService(MESH_BLE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
-            val characteristic = BluetoothGattCharacteristic(
-                MESH_MESSAGE_CHAR_UUID,
-                BluetoothGattCharacteristic.PROPERTY_WRITE,
-                BluetoothGattCharacteristic.PERMISSION_WRITE
-            )
-            service.addCharacteristic(characteristic)
-            gattServer?.addService(service)
-        } catch (e: SecurityException) {
-            Log.e("MeshTransport", "Missing permissions for GATT Server", e)
-        }
-    }
 
     private val gattServerCallback = object : BluetoothGattServerCallback() {
         override fun onCharacteristicWriteRequest(
@@ -59,9 +45,63 @@ class MeshTransportManager(private val context: Context) {
                 Log.d("MeshTransport", "Received GATT write from ${device.address}: $payload")
                 onMessageReceived?.invoke(payload)
                 if (responseNeeded) {
-                    gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                    try {
+                        gattServer?.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, 0, null)
+                    } catch (e: SecurityException) {
+                        Log.e("MeshTransport", "Security exception sending GATT response", e)
+                    }
                 }
             }
+        }
+    }
+
+    init {
+        bluetoothBackend.onMessageReceived = { payload ->
+            onMessageReceived?.invoke(payload)
+        }
+
+        scannerManager.onDeviceDiscovered = { device ->
+            try {
+                val name = device.name ?: "Unknown Peer"
+                val address = device.address
+                onPeerDiscovered?.invoke(address, name, address, -50)
+                
+                // Automatically attempt to connect to the discovered peer to establish a data pipe
+                connectToPeer(address)
+            } catch (e: SecurityException) {
+                Log.e("MeshTransport", "Permission missing for device name", e)
+            }
+        }
+    }
+
+    fun startMeshServices(deviceId: String) {
+        setupGattServer()
+        bluetoothBackend.startListening()
+        startAdvertising(deviceId)
+        startScanning()
+    }
+
+    private fun setupGattServer() {
+        if (bluetoothAdapter == null) {
+            Log.w("MeshTransport", "Bluetooth adapter is null, skipping GATT server setup.")
+            return
+        }
+        try {
+            gattServer = bluetoothManager.openGattServer(context, gattServerCallback)
+            if (gattServer == null) {
+                Log.w("MeshTransport", "GATT server is null (Bluetooth might be disabled or unsupported).")
+                return
+            }
+            val service = BluetoothGattService(MESH_BLE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY)
+            val characteristic = BluetoothGattCharacteristic(
+                MESH_MESSAGE_CHAR_UUID,
+                BluetoothGattCharacteristic.PROPERTY_WRITE,
+                BluetoothGattCharacteristic.PERMISSION_WRITE
+            )
+            service.addCharacteristic(characteristic)
+            gattServer?.addService(service)
+        } catch (e: SecurityException) {
+            Log.e("MeshTransport", "Missing permissions for GATT Server", e)
         }
     }
 
@@ -82,7 +122,7 @@ class MeshTransportManager(private val context: Context) {
                 String(it, Charsets.UTF_8) 
             }
             if (deviceId != null) {
-                onPeerDiscovered?.invoke(deviceId, result.device.address, result.rssi)
+                onPeerDiscovered?.invoke(deviceId, result.device.name, result.device.address, result.rssi)
                 // In a real mesh, we might keep track of peers to connect later
                 lastDiscoveredDevice = result.device
             }
@@ -91,8 +131,20 @@ class MeshTransportManager(private val context: Context) {
 
     private var lastDiscoveredDevice: BluetoothDevice? = null
 
+    @SuppressLint("MissingPermission")
     fun startAdvertising(deviceId: String) {
-        val advertiser = bluetoothAdapter?.bluetoothLeAdvertiser ?: return
+        // Always try to set the friendly name so classic discovery sees it
+        if (identityManager.isSetupComplete()) {
+            identityManager.getUsername()?.let { name ->
+                bluetoothAdapter?.name = name
+            }
+        }
+
+        val advertiser = bluetoothAdapter?.bluetoothLeAdvertiser ?: run {
+            Log.w("MeshTransport", "BLE Advertiser not available on this device")
+            return
+        }
+
         val settings = AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
@@ -113,33 +165,63 @@ class MeshTransportManager(private val context: Context) {
     }
 
     fun startScanning() {
-        val scanner = bluetoothAdapter?.bluetoothLeScanner ?: return
         if (isScanning) return
         
-        val filter = ScanFilter.Builder()
-            .setServiceUuid(ParcelUuid(MESH_BLE_UUID))
-            .build()
-            
-        val settings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-            .build()
+        // Try to start BLE Scan if available
+        val scanner = bluetoothAdapter?.bluetoothLeScanner
+        if (scanner != null) {
+            val filter = ScanFilter.Builder()
+                .setServiceUuid(ParcelUuid(MESH_BLE_UUID))
+                .build()
+                
+            val settings = ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+                .build()
 
-        try {
-            scanner.startScan(listOf(filter), settings, scanCallback)
-            isScanning = true
-        } catch (e: SecurityException) {
-            Log.e("MeshTransport", "Missing BLE permissions", e)
+            try {
+                scanner.startScan(listOf(filter), settings, scanCallback)
+                Log.d("MeshTransport", "BLE Scanning started")
+            } catch (e: SecurityException) {
+                Log.e("MeshTransport", "Missing BLE permissions", e)
+            }
+        } else {
+            Log.w("MeshTransport", "BLE Scanner not available on this device")
         }
+
+        // Always start Classic Bluetooth Scan
+        scannerManager.startScanning()
+        isScanning = true
+    }
+
+    fun stopScanning() {
+        // Stop BLE Scan if available
+        bluetoothAdapter?.bluetoothLeScanner?.let { scanner ->
+            try {
+                scanner.stopScan(scanCallback)
+            } catch (e: SecurityException) {
+                Log.e("MeshTransport", "Missing BLE permissions", e)
+            }
+        }
+        
+        // Always stop Classic Bluetooth Scan
+        scannerManager.stopScanning()
+        isScanning = false
     }
 
     fun broadcastMessage(payload: String) {
-        Log.i("MeshTransport", "Initiating BLE Mesh Broadcast (GATT Write)")
+        Log.i("MeshTransport", "Initiating Mesh Broadcast (RFCOMM)")
+        bluetoothBackend.broadcastMessage(payload)
         
-        // Real logic: Connect to discovered peers and write
-        // For demonstration, we attempt to connect to the 'lastDiscoveredDevice'
+        // Fallback or secondary broadcast via BLE GATT if needed
         lastDiscoveredDevice?.let { device ->
             connectAndWrite(device, payload)
-        } ?: Log.w("MeshTransport", "No peers found to broadcast to.")
+        }
+    }
+
+    fun connectToPeer(address: String) {
+        bluetoothAdapter?.getRemoteDevice(address)?.let { device ->
+            bluetoothBackend.connectToDevice(device)
+        }
     }
 
     private fun connectAndWrite(device: BluetoothDevice, payload: String) {

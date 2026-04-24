@@ -19,9 +19,8 @@ import com.meshlink.android.ui.theme.MeshGrey
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SetupScreen(onContinue: () -> Unit) {
+fun SetupScreen(onContinue: (String) -> Unit) {
     var name by remember { mutableStateOf("") }
-    val autoId = "ML-" + "TEMP123"
 
     Column(
         modifier = Modifier
@@ -80,13 +79,13 @@ fun SetupScreen(onContinue: () -> Unit) {
                 .padding(15.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(text = "Auto ID: \$autoId", color = Color.White, fontWeight = FontWeight.Bold)
+            Text(text = "Identity will be generated on Continue", color = Color.White, fontSize = 12.sp)
         }
 
         Spacer(modifier = Modifier.weight(1f))
 
         Button(
-            onClick = onContinue,
+            onClick = { onContinue(name) },
             enabled = name.isNotBlank(),
             modifier = Modifier.fillMaxWidth(),
             colors = ButtonDefaults.buttonColors(
